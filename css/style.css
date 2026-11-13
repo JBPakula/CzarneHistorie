@@ -1,0 +1,99 @@
+:root {
+    --bg-main: #0f1115;
+    --bg-card: #181b22;
+    --accent-red: #dc3545;
+    --accent-info: #0dcaf0;
+    --border-subtle: #2b303b;
+}
+
+body {
+    background-color: var(--bg-main);
+    color: #e9ecef;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    min-height: 100vh;
+}
+
+/* Zarządzanie widokami SPA */
+.app-tab {
+    display: none !important;
+    min-height: 100vh;
+}
+
+.app-tab.active {
+    display: block !important;
+}
+
+#tab-splash.active,
+#tab-login.active {
+    display: flex !important;
+}
+
+/* Splash Screen */
+.splash-icon {
+    font-size: 4.5rem;
+    color: var(--accent-red);
+    animation: pulseGlow 2s infinite ease-in-out;
+}
+
+@keyframes pulseGlow {
+    0%, 100% { transform: scale(1); opacity: 0.9; }
+    50% { transform: scale(1.06); opacity: 1; }
+}
+
+/* Karty */
+.card {
+    background-color: var(--bg-card);
+    border-color: var(--border-subtle);
+}
+
+.story-card {
+    cursor: pointer;
+    transition: transform 0.15s ease, border-color 0.15s ease;
+}
+
+.story-card:hover {
+    transform: translateY(-2px);
+    border-color: var(--accent-red);
+}
+
+.story-intro-text {
+    font-size: 1.05rem;
+    line-height: 1.6;
+}
+
+/* Węzły pytań i odpowiedzi */
+.node-card {
+    border-left: 4px solid var(--border-subtle);
+    transition: all 0.2s ease;
+}
+
+.node-card.is-active-parent {
+    border-right: 3px solid var(--accent-info);
+}
+
+/* Maskowanie spoilerów i wpisów prywatnych */
+.spoiler-blur {
+    filter: blur(6px);
+    user-select: none;
+    cursor: pointer;
+    transition: filter 0.25s ease;
+}
+
+.spoiler-blur.revealed {
+    filter: none;
+    user-select: auto;
+    cursor: default;
+}
+
+.avatar-dot {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 0.8rem;
+    color: #fff;
+    flex-shrink: 0;
+}
