@@ -413,18 +413,26 @@ document.getElementById('btn-send-question').addEventListener('click', async () 
     btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Mistrz Gry analizuje akta...';
 
     try {
-        const { data, error } = await supabaseClient.functions.invoke('game-master', {
-            body: {
+        const response = await fetch(`${SUPABASE_URL}/functions/v1/game-master`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'apikey': SUPABASE_KEY
+            },
+            body: JSON.stringify({
                 action: 'ask_question',
                 story_id: state.currentStory.id,
                 parent_node_id: state.activeLeafNodeId,
                 author_id: state.currentUser.id,
                 question_text: questionText,
                 visibility: visibility
-            }
+            })
         });
 
-        if (error) throw error;
+        const data = await response.json();
+        if (!response.ok || data.error) {
+            throw new Error(data.error || `Błąd serwera (${response.status})`);
+        }
 
         input.value = '';
         if (data?.node?.id) {
@@ -432,7 +440,7 @@ document.getElementById('btn-send-question').addEventListener('click', async () 
         }
         await syncStoryNodes();
     } catch (err) {
-        alert('Błąd komunikacji z Mistrzem Gry AI (upewnij się, że wdrożyliśmy Edge Function "game-master"): ' + err.message);
+        alert('Błąd komunikacji z Mistrzem Gry AI: ' + err.message);
     } finally {
         btn.disabled = false;
         btn.innerHTML = '<i class="bi bi-send me-2"></i>Zapytaj Mistrza Gry AI';
