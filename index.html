@@ -151,7 +151,7 @@
             <!-- Oś czasu pytań i odpowiedzi -->
             <div id="nodes-timeline" class="d-flex flex-column gap-3 mb-4"></div>
 
-            <!-- Formularz zadawania pytania AI -->
+           <!-- Formularz zadawania pytania AI -->
             <div class="card border-secondary shadow-sm mt-4" id="ask-panel">
                 <div class="card-body">
                     <label for="question-input" class="form-label small fw-semibold text-secondary">
@@ -159,15 +159,13 @@
                     </label>
                     <textarea id="question-input" class="form-control mb-2" rows="2" placeholder="Np. Czy ofiara znała sprawcę przed dniem zdarzenia?"></textarea>
                     
-                    <!-- Opcje widoczności odpowiedzi -->
+                    <!-- Opcja prywatności przed zadaniem pytania -->
                     <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
                         <div class="d-flex align-items-center gap-2">
-                            <label for="visibility-select" class="small text-secondary mb-0">Widoczność:</label>
+                            <label for="visibility-select" class="small text-secondary mb-0">Widoczność wpisu:</label>
                             <select id="visibility-select" class="form-select form-select-sm" style="width: auto;">
-                                <option value="public" selected>👁️ Publiczne dla wszystkich</option>
-                                <option value="private">🔒 Prywatne (tylko dla mnie)</option>
-                                <option value="spoiler_clue">💡 Ważna wskazówka (Spoiler)</option>
-                                <option value="spoiler_solution">🎯 Rozwiązanie (Spoiler)</option>
+                                <option value="public" selected>👥 Widoczne na liście (zwinięte dla innych)</option>
+                                <option value="private">🔒 Całkowicie prywatne (tylko dla mnie)</option>
                             </select>
                         </div>
                     </div>

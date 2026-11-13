@@ -331,66 +331,127 @@ function renderNodesTimeline() {
         const author = state.usersMap[node.author_id] || { username: 'Gracz', avatar_color: '#6c757d' };
         const isMine = node.author_id === state.currentUser.id;
         const isSelectedParent = node.id === state.activeLeafNodeId;
+        const stepNumber = index + 1;
 
-        // Obsługa ukrywania / spoilerów
-        let isHiddenForMe = false;
+        // Plakietka statusu (Wskazówka / Rozwiązanie / Prywatne)
         let badgeHtml = '';
-
         if (node.visibility === 'private') {
             badgeHtml = '<span class="badge bg-dark border border-secondary text-secondary"><i class="bi bi-lock-fill me-1"></i>Prywatne</span>';
-            if (!isMine) isHiddenForMe = true;
         } else if (node.visibility === 'spoiler_clue') {
-            badgeHtml = '<span class="badge bg-warning text-dark"><i class="bi bi-lightbulb-fill me-1"></i>Wskazówka</span>';
-            if (!isMine) isHiddenForMe = true;
+            badgeHtml = '<span class="badge bg-warning text-dark"><i class="bi bi-lightbulb-fill me-1"></i>Ważna wskazówka</span>';
         } else if (node.visibility === 'spoiler_solution') {
             badgeHtml = '<span class="badge bg-danger"><i class="bi bi-bullseye me-1"></i>Rozwiązanie</span>';
-            if (!isMine) isHiddenForMe = true;
         }
 
-        const answerContent = isHiddenForMe
-            ? `<div class="p-2 rounded bg-black bg-opacity-25 text-secondary small fst-italic spoiler-blur" onclick="this.classList.toggle('revealed')" title="Kliknij, aby odsłonić na własną odpowiedzialność">
-                 [Ukryta odpowiedź gracza ${escapeHtml(author.username)} – kliknij, aby odsłonić] <br><span class="text-light">${escapeHtml(node.ai_answer_text)}</span>
-               </div>`
-            : `<div class="text-light">${escapeHtml(node.ai_answer_text)}</div>`;
+        // Panel oznaczania po fakcie (tylko dla autora danego pytania)
+        const ownerControlsHtml = isMine ? `
+            <div class="d-flex flex-wrap align-items-center gap-1 mt-2 pt-2 border-top border-secondary-subtle">
+                <span class="text-secondary me-1" style="font-size: 0.72rem;">Oznacz wpis:</span>
+                <button class="btn btn-sm py-0 px-2 ${node.visibility === 'public' ? 'btn-secondary' : 'btn-outline-secondary'}" style="font-size: 0.72rem;" onclick="updateNodeVisibility('${node.id}', 'public')">
+                    Zwykły
+                </button>
+                <button class="btn btn-sm py-0 px-2 ${node.visibility === 'spoiler_clue' ? 'btn-warning text-dark fw-semibold' : 'btn-outline-warning'}" style="font-size: 0.72rem;" onclick="updateNodeVisibility('${node.id}', 'spoiler_clue')">
+                    💡 Wskazówka
+                </button>
+                <button class="btn btn-sm py-0 px-2 ${node.visibility === 'spoiler_solution' ? 'btn-danger fw-semibold' : 'btn-outline-danger'}" style="font-size: 0.72rem;" onclick="updateNodeVisibility('${node.id}', 'spoiler_solution')">
+                    🎯 Rozwiązanie
+                </button>
+                <button class="btn btn-sm py-0 px-2 ${node.visibility === 'private' ? 'btn-dark border-light' : 'btn-outline-secondary'}" style="font-size: 0.72rem;" onclick="updateNodeVisibility('${node.id}', 'private')">
+                    🔒 Tylko dla mnie
+                </button>
+            </div>
+        ` : '';
+
+        // Treść wewnętrzna (dla autora otwarta od razu, dla innych zwinięta pod kliknięciem)
+        let bodyContentHtml = '';
+
+        if (isMine) {
+            bodyContentHtml = `
+                <p class="mb-2 fw-semibold text-info-emphasis small mt-2">Pytanie: ${escapeHtml(node.question_text)}</p>
+                <div class="border-top border-secondary-subtle pt-2 small">
+                    <span class="text-danger fw-bold me-1">AI:</span> <span class="text-light">${escapeHtml(node.ai_answer_text)}</span>
+                </div>
+                ${ownerControlsHtml}
+            `;
+        } else if (node.visibility === 'private') {
+            bodyContentHtml = `
+                <div class="mt-2 small text-secondary fst-italic">
+                    <i class="bi bi-shield-lock me-1"></i>Ten krok śledztwa jest oznaczony jako prywatny przez autora. Możesz rozwidlić historię sprzed tego punktu.
+                </div>
+            `;
+        } else {
+            const warningNote = node.visibility === 'spoiler_solution'
+                ? 'Uwaga: autor oznaczył ten wpis jako ROZWIĄZANIE. Kliknij, aby odsłonić na własną odpowiedzialność'
+                : node.visibility === 'spoiler_clue'
+                    ? 'Autor oznaczył ten wpis jako WAŻNĄ WSKAZÓWKĘ. Kliknij, aby odsłonić'
+                    : 'Kliknij, aby rozwinąć pytanie i odpowiedź AI';
+
+            bodyContentHtml = `
+                <div class="mt-2">
+                    <button class="btn btn-outline-secondary btn-sm w-100 text-start d-flex justify-content-between align-items-center" type="button" onclick="toggleNodeReveal('${node.id}', this)">
+                        <span class="small"><i class="bi bi-eye me-2"></i>${warningNote}</span>
+                        <i class="bi bi-chevron-down"></i>
+                    </button>
+                    <div id="node-secret-body-${node.id}" class="d-none mt-2 p-2 rounded bg-black bg-opacity-25 border border-secondary-subtle">
+                        <p class="mb-2 fw-semibold text-info-emphasis small">Pytanie: ${escapeHtml(node.question_text)}</p>
+                        <div class="border-top border-secondary-subtle pt-2 small">
+                            <span class="text-danger fw-bold me-1">AI:</span> <span class="text-light">${escapeHtml(node.ai_answer_text)}</span>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
 
         return `
             <div class="card node-card ${isSelectedParent ? 'is-active-parent' : ''}">
                 <div class="card-body py-2 px-3">
-                    <div class="d-flex justify-content-between align-items-center mb-2">
+                    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
                         <div class="d-flex align-items-center gap-2">
                             <span class="avatar-dot" style="background-color: ${author.avatar_color};">${author.username[0]}</span>
-                            <strong class="small">${escapeHtml(author.username)}</strong>
-                            <span class="text-secondary small">#${index + 1}</span>
+                            <strong class="small text-light">${escapeHtml(author.username)} — Pytanie #${stepNumber}</strong>
                             ${badgeHtml}
                         </div>
                         <button class="btn btn-outline-info btn-sm py-0 px-2" style="font-size: 0.75rem;" onclick="forkFromNode('${node.id}')" title="Kontynuuj śledztwo od tego momentu (Git Fork)">
                             <i class="bi bi-diagram-2"></i> Rozwidlij stąd
                         </button>
                     </div>
-                    <p class="mb-2 fw-semibold text-info-emphasis small">Pytanie: ${escapeHtml(node.question_text)}</p>
-                    <div class="border-top border-secondary-subtle pt-2 small">
-                        <span class="text-danger fw-bold me-1">AI:</span> ${answerContent}
-                    </div>
+                    ${bodyContentHtml}
                 </div>
             </div>
         `;
     }).join('');
 }
 
-window.forkFromNode = function(nodeId) {
-    state.activeLeafNodeId = nodeId;
-    renderNodesTimeline();
-    document.getElementById('question-input').focus();
+// Rozwijanie / zwijanie cudzego pytania i odpowiedzi na żądanie
+window.toggleNodeReveal = function(nodeId, btnEl) {
+    const bodyEl = document.getElementById(`node-secret-body-${nodeId}`);
+    if (!bodyEl) return;
+    const isHidden = bodyEl.classList.contains('d-none');
+    bodyEl.classList.toggle('d-none');
+    const icon = btnEl.querySelector('.bi-chevron-down, .bi-chevron-up');
+    if (icon) {
+        icon.className = isHidden ? 'bi bi-chevron-up' : 'bi bi-chevron-down';
+    }
 };
 
-document.getElementById('btn-reset-branch').addEventListener('click', () => {
-    if (state.currentNodes.length > 0) {
-        state.activeLeafNodeId = state.currentNodes[state.currentNodes.length - 1].id;
-    } else {
-        state.activeLeafNodeId = null;
+// Zmiana oznaczenia wpisu (Zwykły / Wskazówka / Rozwiązanie / Prywatne) już po poznaniu odpowiedzi AI
+window.updateNodeVisibility = async function(nodeId, newVisibility) {
+    const { error } = await supabaseClient
+        .from('ch_nodes')
+        .update({ visibility: newVisibility })
+        .eq('id', nodeId);
+
+    if (error) {
+        alert('Nie udało się zaktualizować oznaczenia: ' + error.message);
+        return;
+    }
+
+    const targetNode = state.currentNodes.find(n => n.id === nodeId);
+    if (targetNode) {
+        targetNode.visibility = newVisibility;
     }
     renderNodesTimeline();
-});
+};
 
 document.getElementById('btn-sync-story').addEventListener('click', syncStoryNodes);
 
