@@ -215,7 +215,7 @@ document.querySelectorAll('#stories-filter-pills .nav-link').forEach(btn => {
 document.getElementById('btn-refresh-stories').addEventListener('click', loadDashboardData);
 
 // ============================================================================
-// TWORZENIE NOWEJ HISTORII (WYWOŁANIE EDGE FUNCTION 'game-master')
+// TWORZENIE NOWEJ HISTORII (WYWOŁANIE EDGE FUNCTION 'quick-api' / game-master)
 // ============================================================================
 document.getElementById('btn-confirm-create-story').addEventListener('click', async () => {
     const btn = document.getElementById('btn-confirm-create-story');
@@ -225,11 +225,12 @@ document.getElementById('btn-confirm-create-story').addEventListener('click', as
     btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Mistrz Gry pisze sprawę...';
 
     try {
-        const response = await fetch(`${SUPABASE_URL}/functions/v1/game-master`, {
+        const response = await fetch(`${SUPABASE_URL}/functions/v1/quick-api`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'apikey': SUPABASE_KEY
+                'apikey': SUPABASE_KEY,
+                'Authorization': `Bearer ${SUPABASE_KEY}`
             },
             body: JSON.stringify({
                 action: 'create_story',
@@ -413,11 +414,12 @@ document.getElementById('btn-send-question').addEventListener('click', async () 
     btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Mistrz Gry analizuje akta...';
 
     try {
-        const response = await fetch(`${SUPABASE_URL}/functions/v1/game-master`, {
+        const response = await fetch(`${SUPABASE_URL}/functions/v1/quick-api`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'apikey': SUPABASE_KEY
+                'apikey': SUPABASE_KEY,
+                'Authorization': `Bearer ${SUPABASE_KEY}`
             },
             body: JSON.stringify({
                 action: 'ask_question',
