@@ -21,6 +21,9 @@ let state = {
     storyFilter: 'active'
 };
 
+// Zestaw ID węzłów aktualnie rozwiniętych przez użytkownika w trakcie sesji
+const expandedNodeIds = new Set();
+
 // ============================================================================
 // ROUTING SPA (SEKWENCJA: SPLASH -> LOGIN -> DASHBOARD -> STORY)
 // ============================================================================
@@ -271,6 +274,8 @@ async function openStory(storyId) {
     document.getElementById('story-intro').textContent = state.currentStory.public_intro;
     document.getElementById('story-meta-date').textContent = new Date(state.currentStory.created_at).toLocaleDateString('pl-PL');
 
+    // Resetujemy rozwinięte karty przy wejściu do sprawy, aby wszystkie były domyślnie zwinięte
+    expandedNodeIds.clear();
     updateCompleteButtonUI();
     switchTab('tab-story');
     await syncStoryNodes();
@@ -332,18 +337,19 @@ function renderNodesTimeline() {
         const isMine = node.author_id === state.currentUser.id;
         const isSelectedParent = node.id === state.activeLeafNodeId;
         const stepNumber = index + 1;
+        const isExpanded = expandedNodeIds.has(node.id);
 
-        // Plakietka statusu (Wskazówka / Rozwiązanie / Prywatne)
+        // Plakietka statusu widoczna od razu na zwiniętym pasku
         let badgeHtml = '';
         if (node.visibility === 'private') {
             badgeHtml = '<span class="badge bg-dark border border-secondary text-secondary"><i class="bi bi-lock-fill me-1"></i>Prywatne</span>';
         } else if (node.visibility === 'spoiler_clue') {
-            badgeHtml = '<span class="badge bg-warning text-dark"><i class="bi bi-lightbulb-fill me-1"></i>Ważna wskazówka</span>';
+            badgeHtml = '<span class="badge bg-warning text-dark"><i class="bi bi-lightbulb-fill me-1"></i>Wskazówka</span>';
         } else if (node.visibility === 'spoiler_solution') {
             badgeHtml = '<span class="badge bg-danger"><i class="bi bi-bullseye me-1"></i>Rozwiązanie</span>';
         }
 
-        // Panel oznaczania po fakcie (tylko dla autora danego pytania)
+        // Panel oznaczania po fakcie (tylko dla autora danego pytania, widoczny po rozwinięciu)
         const ownerControlsHtml = isMine ? `
             <div class="d-flex flex-wrap align-items-center gap-1 mt-2 pt-2 border-top border-secondary-subtle">
                 <span class="text-secondary me-1" style="font-size: 0.72rem;">Oznacz wpis:</span>
@@ -362,79 +368,65 @@ function renderNodesTimeline() {
             </div>
         ` : '';
 
-        // Treść wewnętrzna (dla autora otwarta od razu, dla innych zwinięta pod kliknięciem)
-        let bodyContentHtml = '';
+        // Czy karta może zostać rozwinięta przez zalogowanego użytkownika (cudzych wpisów 'private' nie da się rozwinąć)
+        const isLockedPrivateForMe = !isMine && node.visibility === 'private';
 
-        if (isMine) {
-            bodyContentHtml = `
-                <p class="mb-2 fw-semibold text-info-emphasis small mt-2">Pytanie: ${escapeHtml(node.question_text)}</p>
-                <div class="border-top border-secondary-subtle pt-2 small">
-                    <span class="text-danger fw-bold me-1">AI:</span> <span class="text-light">${escapeHtml(node.ai_answer_text)}</span>
-                </div>
-                ${ownerControlsHtml}
-            `;
-        } else if (node.visibility === 'private') {
-            bodyContentHtml = `
-                <div class="mt-2 small text-secondary fst-italic">
-                    <i class="bi bi-shield-lock me-1"></i>Ten krok śledztwa jest oznaczony jako prywatny przez autora. Możesz rozwidlić historię sprzed tego punktu.
-                </div>
-            `;
-        } else {
-            const warningNote = node.visibility === 'spoiler_solution'
-                ? 'Uwaga: autor oznaczył ten wpis jako ROZWIĄZANIE. Kliknij, aby odsłonić na własną odpowiedzialność'
-                : node.visibility === 'spoiler_clue'
-                    ? 'Autor oznaczył ten wpis jako WAŻNĄ WSKAZÓWKĘ. Kliknij, aby odsłonić'
-                    : 'Kliknij, aby rozwinąć pytanie i odpowiedź AI';
-
-            bodyContentHtml = `
-                <div class="mt-2">
-                    <button class="btn btn-outline-secondary btn-sm w-100 text-start d-flex justify-content-between align-items-center" type="button" onclick="toggleNodeReveal('${node.id}', this)">
-                        <span class="small"><i class="bi bi-eye me-2"></i>${warningNote}</span>
-                        <i class="bi bi-chevron-down"></i>
-                    </button>
-                    <div id="node-secret-body-${node.id}" class="d-none mt-2 p-2 rounded bg-black bg-opacity-25 border border-secondary-subtle">
-                        <p class="mb-2 fw-semibold text-info-emphasis small">Pytanie: ${escapeHtml(node.question_text)}</p>
-                        <div class="border-top border-secondary-subtle pt-2 small">
-                            <span class="text-danger fw-bold me-1">AI:</span> <span class="text-light">${escapeHtml(node.ai_answer_text)}</span>
-                        </div>
-                    </div>
-                </div>
-            `;
-        }
+        const expandableBodyHtml = isLockedPrivateForMe
+            ? `<div id="node-secret-body-${node.id}" class="${isExpanded ? '' : 'd-none'} mt-2 pt-2 border-top border-secondary-subtle small text-secondary fst-italic">
+                   <i class="bi bi-shield-lock me-1"></i>Wpis prywatny autora (${escapeHtml(author.username)}). Możesz użyć „Rozwidlij stąd”, aby poprowadzić własną ścieżkę.
+               </div>`
+            : `<div id="node-secret-body-${node.id}" class="${isExpanded ? '' : 'd-none'} mt-2 pt-2 border-top border-secondary-subtle">
+                   <p class="mb-2 fw-semibold text-info-emphasis small">Pytanie: ${escapeHtml(node.question_text)}</p>
+                   <div class="border-top border-secondary-subtle pt-2 small">
+                       <span class="text-danger fw-bold me-1">AI:</span> <span class="text-light">${escapeHtml(node.ai_answer_text)}</span>
+                   </div>
+                   ${ownerControlsHtml}
+               </div>`;
 
         return `
             <div class="card node-card ${isSelectedParent ? 'is-active-parent' : ''}">
                 <div class="card-body py-2 px-3">
                     <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
-                        <div class="d-flex align-items-center gap-2">
+                        <div class="d-flex align-items-center gap-2 flex-grow-1" style="cursor: pointer;" onclick="toggleNodeReveal('${node.id}')">
                             <span class="avatar-dot" style="background-color: ${author.avatar_color};">${author.username[0]}</span>
                             <strong class="small text-light">${escapeHtml(author.username)} — Pytanie #${stepNumber}</strong>
                             ${badgeHtml}
+                            <i id="node-chevron-${node.id}" class="bi ${isExpanded ? 'bi-chevron-up' : 'bi-chevron-down'} text-secondary small ms-1"></i>
                         </div>
                         <button class="btn btn-outline-info btn-sm py-0 px-2" style="font-size: 0.75rem;" onclick="forkFromNode('${node.id}')" title="Kontynuuj śledztwo od tego momentu (Git Fork)">
                             <i class="bi bi-diagram-2"></i> Rozwidlij stąd
                         </button>
                     </div>
-                    ${bodyContentHtml}
+                    ${expandableBodyHtml}
                 </div>
             </div>
         `;
     }).join('');
 }
 
-// Rozwijanie / zwijanie cudzego pytania i odpowiedzi na żądanie
-window.toggleNodeReveal = function(nodeId, btnEl) {
+// Rozwijanie / zwijanie dowolnej karty pytania i odpowiedzi po kliknięciu w nagłówek
+window.toggleNodeReveal = function(nodeId) {
     const bodyEl = document.getElementById(`node-secret-body-${nodeId}`);
+    const chevronEl = document.getElementById(`node-chevron-${nodeId}`);
     if (!bodyEl) return;
-    const isHidden = bodyEl.classList.contains('d-none');
+
+    const willExpand = bodyEl.classList.contains('d-none');
     bodyEl.classList.toggle('d-none');
-    const icon = btnEl.querySelector('.bi-chevron-down, .bi-chevron-up');
-    if (icon) {
-        icon.className = isHidden ? 'bi bi-chevron-up' : 'bi bi-chevron-down';
+
+    if (willExpand) {
+        expandedNodeIds.add(nodeId);
+    } else {
+        expandedNodeIds.delete(nodeId);
+    }
+
+    if (chevronEl) {
+        chevronEl.className = willExpand
+            ? 'bi bi-chevron-up text-secondary small ms-1'
+            : 'bi bi-chevron-down text-secondary small ms-1';
     }
 };
 
-// Zmiana oznaczenia wpisu (Zwykły / Wskazówka / Rozwiązanie / Prywatne) już po poznaniu odpowiedzi AI
+// Zmiana oznaczenia wpisu (Zwykły / Wskazówka / Rozwiązanie / Prywatne) po poznaniu odpowiedzi AI
 window.updateNodeVisibility = async function(nodeId, newVisibility) {
     const { error } = await supabaseClient
         .from('ch_nodes')
@@ -453,11 +445,28 @@ window.updateNodeVisibility = async function(nodeId, newVisibility) {
     renderNodesTimeline();
 };
 
+// Rozwidlanie ścieżki śledztwa (Git Fork)
+window.forkFromNode = function(nodeId) {
+    state.activeLeafNodeId = nodeId;
+    renderNodesTimeline();
+    document.getElementById('question-input').focus();
+};
+
+document.getElementById('btn-reset-branch').addEventListener('click', () => {
+    if (state.currentNodes.length > 0) {
+        state.activeLeafNodeId = state.currentNodes[state.currentNodes.length - 1].id;
+    } else {
+        state.activeLeafNodeId = null;
+    }
+    renderNodesTimeline();
+});
+
 document.getElementById('btn-sync-story').addEventListener('click', syncStoryNodes);
 
 document.getElementById('btn-back-dashboard').addEventListener('click', async () => {
     state.currentStory = null;
     state.activeLeafNodeId = null;
+    expandedNodeIds.clear();
     await loadDashboardData();
     switchTab('tab-dashboard');
 });
@@ -500,6 +509,7 @@ document.getElementById('btn-send-question').addEventListener('click', async () 
         input.value = '';
         if (data?.node?.id) {
             state.activeLeafNodeId = data.node.id;
+            expandedNodeIds.add(data.node.id);
         }
         await syncStoryNodes();
     } catch (err) {
