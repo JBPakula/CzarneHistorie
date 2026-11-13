@@ -225,15 +225,23 @@ document.getElementById('btn-confirm-create-story').addEventListener('click', as
     btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Mistrz Gry pisze sprawę...';
 
     try {
-        const { data, error } = await supabaseClient.functions.invoke('game-master', {
-            body: {
+        const response = await fetch(`${SUPABASE_URL}/functions/v1/game-master`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'apikey': SUPABASE_KEY
+            },
+            body: JSON.stringify({
                 action: 'create_story',
                 theme: theme,
                 created_by: state.currentUser.id
-            }
+            })
         });
 
-        if (error) throw error;
+        const data = await response.json();
+        if (!response.ok || data.error) {
+            throw new Error(data.error || `Błąd serwera (${response.status})`);
+        }
 
         const modal = bootstrap.Modal.getInstance(document.getElementById('newStoryModal'));
         modal.hide();
@@ -244,7 +252,7 @@ document.getElementById('btn-confirm-create-story').addEventListener('click', as
             await openStory(data.story.id);
         }
     } catch (err) {
-        alert('Nie udało się wygenerować historii (upewnij się, że wdrożyliśmy Edge Function "game-master"): ' + err.message);
+        alert('Nie udało się wygenerować historii: ' + err.message);
     } finally {
         btn.disabled = false;
         btn.innerHTML = '<i class="bi bi-stars me-1"></i>Generuj zagadkę';
