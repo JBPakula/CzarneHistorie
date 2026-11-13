@@ -1,99 +1,145 @@
 :root {
-    --bg-main: #0f1115;
-    --bg-card: #181b22;
-    --accent-red: #dc3545;
-    --accent-info: #0dcaf0;
-    --border-subtle: #2b303b;
+    --ch-bg: #121214;
+    --ch-card: #1c1c21;
+    --ch-accent: #dc3545;
+    --ch-border: #2e2e36;
 }
 
 body {
-    background-color: var(--bg-main);
-    color: #e9ecef;
+    background-color: var(--ch-bg) !important;
     font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-    min-height: 100vh;
 }
 
-/* Zarządzanie widokami SPA */
+/* SPA Routing: ukrywa nieaktywne sekcje */
 .app-tab {
-    display: none !important;
-    min-height: 100vh;
+    display: none;
 }
 
 .app-tab.active {
-    display: block !important;
+    display: block;
+    animation: fadeIn 0.2s ease-in-out;
 }
 
-#tab-splash.active,
-#tab-login.active {
+#tab-splash.active {
     display: flex !important;
 }
 
-/* Splash Screen */
-.splash-icon {
-    font-size: 4.5rem;
-    color: var(--accent-red);
-    animation: pulseGlow 2s infinite ease-in-out;
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: translateY(0); }
 }
 
-@keyframes pulseGlow {
-    0%, 100% { transform: scale(1); opacity: 0.9; }
-    50% { transform: scale(1.06); opacity: 1; }
+.pulse-icon {
+    animation: pulse 1.8s infinite;
 }
 
-/* Karty */
-.card {
-    background-color: var(--bg-card);
-    border-color: var(--border-subtle);
+@keyframes pulse {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.06); opacity: 0.75; }
 }
 
+/* Karty historii na pulpicie */
 .story-card {
-    cursor: pointer;
+    background-color: var(--ch-card);
+    border: 1px solid var(--ch-border);
     transition: transform 0.15s ease, border-color 0.15s ease;
+    cursor: pointer;
 }
 
 .story-card:hover {
     transform: translateY(-2px);
-    border-color: var(--accent-red);
+    border-color: var(--ch-accent);
 }
 
+/* Formatowanie opisu startowego / akt sprawy */
 .story-intro-text {
-    font-size: 1.05rem;
-    line-height: 1.6;
+    white-space: pre-line;
+    line-height: 1.55;
+    font-size: 0.95rem;
 }
 
-/* Węzły pytań i odpowiedzi */
+.ai-narrative-text {
+    white-space: pre-line;
+    line-height: 1.55;
+}
+
+/* Przyciski wyboru trybu w modalu tworzenia sprawy */
+.mode-choice-btn {
+    background-color: #18181c;
+    border: 1px solid var(--ch-border);
+    color: #e9ecef;
+    transition: all 0.15s ease;
+}
+
+.mode-choice-btn:hover {
+    background-color: #222228;
+    border-color: #6c757d;
+    color: #ffffff;
+}
+
+.mode-choice-btn.active {
+    background-color: rgba(220, 53, 69, 0.14);
+    border: 2px solid var(--ch-accent);
+    color: #ffffff;
+}
+
+/* Oś czasu węzłów (pytania i odpowiedzi) */
 .node-card {
-    border-left: 4px solid var(--border-subtle);
-    transition: all 0.2s ease;
+    background-color: var(--ch-card);
+    border: 1px solid var(--ch-border);
+    border-left: 4px solid #495057;
 }
 
 .node-card.is-active-parent {
-    border-right: 3px solid var(--accent-info);
+    border-left-color: #0dcaf0;
+    box-shadow: 0 0 0 1px rgba(13, 202, 240, 0.25);
 }
 
-/* Maskowanie spoilerów i wpisów prywatnych */
-.spoiler-blur {
-    filter: blur(6px);
-    user-select: none;
-    cursor: pointer;
-    transition: filter 0.25s ease;
+.node-card.is-clue {
+    border-left-color: #ffc107;
 }
 
-.spoiler-blur.revealed {
-    filter: none;
-    user-select: auto;
-    cursor: default;
+.node-card.is-solution {
+    border-left-color: #dc3545;
 }
 
 .avatar-dot {
-    width: 28px;
-    height: 28px;
+    width: 24px;
+    height: 24px;
     border-radius: 50%;
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    font-size: 0.72rem;
     font-weight: 700;
-    font-size: 0.8rem;
     color: #fff;
     flex-shrink: 0;
+}
+
+/* Plakietka osób, które już rozwiązały sprawę */
+.solvers-pill {
+    background-color: rgba(25, 135, 84, 0.16);
+    border: 1px solid rgba(28, 189, 114, 0.45);
+    color: #75b798;
+    border-radius: 999px;
+    padding: 2px 10px;
+    font-size: 0.75rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+
+
+/* SPA Routing: ukrywa nieaktywne sekcje (nadpisuje także klasę d-flex Bootstrapa) */
+.app-tab {
+    display: none !important;
+}
+
+.app-tab.active {
+    display: block !important;
+    animation: fadeIn 0.2s ease-in-out;
+}
+
+#tab-splash.active {
+    display: flex !important;
 }

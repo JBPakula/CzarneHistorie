@@ -14,11 +14,13 @@ let state = {
     currentUser: null,
     usersMap: {},
     stories: [],
-    userStatesMap: {},
+    userStatesMap: {},      // Statusy aktualnie zalogowanego gracza
+    storySolversMap: {},    // Mapa story_id -> tablica user_id osób, które już ukończyły/rozwiązały sprawę
     currentStory: null,
     currentNodes: [],
-    activeLeafNodeId: null, // Węzeł, od którego kontynuujemy (mechanika Git-fork)
-    storyFilter: 'active'
+    activeLeafNodeId: null, // Węzeł, od którego kontynuujemy w trybie Czarna Historia
+    storyFilter: 'active',
+    selectedNewGameMode: 'black_story'
 };
 
 // Zestaw ID węzłów aktualnie rozwiniętych przez użytkownika w trakcie sesji
@@ -28,33 +30,42 @@ const expandedNodeIds = new Set();
 // ROUTING SPA (SEKWENCJA: SPLASH -> LOGIN -> DASHBOARD -> STORY)
 // ============================================================================
 function switchTab(tabId) {
-    document.querySelectorAll('.app-tab').forEach(el => el.classList.remove('active'));
+    document.querySelectorAll('.app-tab').forEach(el => {
+        el.classList.remove('active');
+        el.classList.add('d-none');
+    });
     const target = document.getElementById(tabId);
-    if (target) target.classList.add('active');
+    if (target) {
+        target.classList.remove('d-none');
+        target.classList.add('active');
+    }
 }
 
 async function initApp() {
-    // 1. Pobierz listę użytkowników do mapy kolorów i ekranu logowania
-    await loadUsers();
+    try {
+        await loadUsers();
+    } catch (err) {
+        console.error('Błąd inicjalizacji listy graczy:', err);
+    }
 
-    // 2. Sprawdź zapamiętaną sesję (niewylogowywalne konta)
     const savedUserJson = localStorage.getItem(STORAGE_KEYS.USER);
+
     setTimeout(async () => {
         if (savedUserJson) {
             try {
                 state.currentUser = JSON.parse(savedUserJson);
                 updateUserBadge();
-                await loadDashboardData();
                 switchTab('tab-dashboard');
+                await loadDashboardData();
                 return;
             } catch (e) {
+                console.error('Błąd odtwarzania sesji:', e);
                 localStorage.removeItem(STORAGE_KEYS.USER);
             }
         }
         switchTab('tab-login');
-    }, 900); // Krótki splash screen
+    }, 800);
 }
-
 // ============================================================================
 // LOGOWANIE I UŻYTKOWNICY
 // ============================================================================
@@ -126,21 +137,24 @@ function updateUserBadge() {
 }
 
 // ============================================================================
-// DASHBOARD (LISTA HISTORII + STATUSY INDYWIDUALNE)
+// DASHBOARD (LISTA HISTORII + STATUSY + KTO JUŻ ROZWIĄZAŁ)
 // ============================================================================
 async function loadDashboardData() {
     const listContainer = document.getElementById('stories-list');
     listContainer.innerHTML = '<div class="text-center text-secondary py-4"><div class="spinner-border spinner-border-sm text-danger"></div></div>';
 
-    const [{ data: stories, error: sErr }, { data: userStates }] = await Promise.all([
+    const [{ data: stories, error: sErr }, { data: allCompletedStates }, { data: solutionNodes }] = await Promise.all([
         supabaseClient
             .from('ch_stories')
-            .select('id, title, public_intro, created_by, created_at')
+            .select('id, title, public_intro, created_by, created_at, game_mode')
             .order('created_at', { ascending: false }),
         supabaseClient
             .from('ch_user_story_states')
-            .select('*')
-            .eq('user_id', state.currentUser.id)
+            .select('*'),
+        supabaseClient
+            .from('ch_nodes')
+            .select('story_id, author_id')
+            .eq('visibility', 'spoiler_solution')
     ]);
 
     if (sErr) {
@@ -150,11 +164,43 @@ async function loadDashboardData() {
 
     state.stories = stories || [];
     state.userStatesMap = {};
-    (userStates || []).forEach(st => {
-        state.userStatesMap[st.story_id] = st;
+    state.storySolversMap = {};
+
+    // Zbieramy statusy własne oraz listę osób, które zamknęły sprawę
+    (allCompletedStates || []).forEach(st => {
+        if (st.user_id === state.currentUser.id) {
+            state.userStatesMap[st.story_id] = st;
+        }
+        if (st.is_completed === true) {
+            if (!state.storySolversMap[st.story_id]) state.storySolversMap[st.story_id] = new Set();
+            state.storySolversMap[st.story_id].add(st.user_id);
+        }
+    });
+
+    // Dodajemy również osoby, które oznaczyły swój wpis jako 'spoiler_solution'
+    (solutionNodes || []).forEach(node => {
+        if (!state.storySolversMap[node.story_id]) state.storySolversMap[node.story_id] = new Set();
+        state.storySolversMap[node.story_id].add(node.author_id);
     });
 
     renderStoriesList();
+}
+
+function getSolversNamesHtml(storyId) {
+    const solverIds = state.storySolversMap[storyId] ? Array.from(state.storySolversMap[storyId]) : [];
+    if (solverIds.length === 0) return '';
+
+    const names = solverIds
+        .map(uid => state.usersMap[uid]?.username)
+        .filter(Boolean);
+
+    if (names.length === 0) return '';
+
+    return `
+        <span class="solvers-pill" title="Osoby, które dotarły już do rozwiązania">
+            <i class="bi bi-trophy-fill text-warning"></i> Rozwiązali: <strong>${escapeHtml(names.join(', '))}</strong>
+        </span>
+    `;
 }
 
 function renderStoriesList() {
@@ -188,13 +234,23 @@ function renderStoriesList() {
     listContainer.innerHTML = filtered.map(story => {
         const author = state.usersMap[story.created_by]?.username || 'System';
         const dateStr = new Date(story.created_at).toLocaleDateString('pl-PL');
+        const isCrime = story.game_mode === 'crime_investigation';
+        const modeBadge = isCrime
+            ? '<span class="badge bg-info text-dark"><i class="bi bi-folder-symlink me-1"></i>Śledztwo Kryminalne</span>'
+            : '<span class="badge bg-danger"><i class="bi bi-incognito me-1"></i>Czarna Historia</span>';
+        const solversHtml = getSolversNamesHtml(story.id);
+
         return `
             <div class="card story-card shadow-sm" onclick="openStory('${story.id}')">
                 <div class="card-body">
-                    <div class="d-flex justify-content-between align-items-start mb-1">
-                        <h3 class="h6 fw-bold mb-0 text-light">${escapeHtml(story.title)}</h3>
-                        <span class="badge bg-secondary-subtle text-secondary-emphasis">${dateStr}</span>
+                    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+                        <div class="d-flex align-items-center gap-2">
+                            ${modeBadge}
+                            <span class="badge bg-secondary-subtle text-secondary-emphasis">${dateStr}</span>
+                        </div>
+                        ${solversHtml}
                     </div>
+                    <h3 class="h6 fw-bold mb-1 text-light">${escapeHtml(story.title)}</h3>
                     <p class="small text-secondary text-truncate mb-2">${escapeHtml(story.public_intro)}</p>
                     <div class="d-flex justify-content-between align-items-center small text-secondary">
                         <span><i class="bi bi-person me-1"></i>Założył(a): ${escapeHtml(author)}</span>
@@ -218,14 +274,22 @@ document.querySelectorAll('#stories-filter-pills .nav-link').forEach(btn => {
 document.getElementById('btn-refresh-stories').addEventListener('click', loadDashboardData);
 
 // ============================================================================
-// TWORZENIE NOWEJ HISTORII (WYWOŁANIE EDGE FUNCTION 'quick-api' / game-master)
+// WYBÓR TRYBU I TWORZENIE NOWEJ HISTORII
 // ============================================================================
+document.querySelectorAll('#game-mode-selector .mode-choice-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('#game-mode-selector .mode-choice-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        state.selectedNewGameMode = btn.dataset.mode;
+    });
+});
+
 document.getElementById('btn-confirm-create-story').addEventListener('click', async () => {
     const btn = document.getElementById('btn-confirm-create-story');
     const theme = document.getElementById('story-theme-input').value.trim();
 
     btn.disabled = true;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Mistrz Gry pisze sprawę...';
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Mistrz Gry przygotowuje sprawę...';
 
     try {
         const response = await fetch(`${SUPABASE_URL}/functions/v1/quick-api`, {
@@ -237,6 +301,7 @@ document.getElementById('btn-confirm-create-story').addEventListener('click', as
             },
             body: JSON.stringify({
                 action: 'create_story',
+                game_mode: state.selectedNewGameMode,
                 theme: theme,
                 created_by: state.currentUser.id
             })
@@ -256,25 +321,45 @@ document.getElementById('btn-confirm-create-story').addEventListener('click', as
             await openStory(data.story.id);
         }
     } catch (err) {
-        alert('Nie udało się wygenerować historii: ' + err.message);
+        alert('Nie udało się wygenerować sprawy: ' + err.message);
     } finally {
         btn.disabled = false;
-        btn.innerHTML = '<i class="bi bi-stars me-1"></i>Generuj zagadkę';
+        btn.innerHTML = '<i class="bi bi-stars me-1"></i>Generuj sprawę';
     }
 });
 
 // ============================================================================
-// WIDOK ŚLEDZTWA, SYNCHRONIZACJA I DRZEWO PYTAŃ (GIT-FORK)
+// WIDOK ŚLEDZTWA, SYNCHRONIZACJA I OŚ CZASU PYTAŃ
 // ============================================================================
 async function openStory(storyId) {
     state.currentStory = state.stories.find(s => s.id === storyId);
     if (!state.currentStory) return;
 
+    const isCrime = state.currentStory.game_mode === 'crime_investigation';
+
     document.getElementById('story-title').textContent = state.currentStory.title;
     document.getElementById('story-intro').textContent = state.currentStory.public_intro;
     document.getElementById('story-meta-date').textContent = new Date(state.currentStory.created_at).toLocaleDateString('pl-PL');
 
-    // Resetujemy rozwinięte karty przy wejściu do sprawy, aby wszystkie były domyślnie zwinięte
+    // Plakietka trybu oraz informacja kto już rozwiązał
+    const modeBadgeEl = document.getElementById('story-mode-badge');
+    if (isCrime) {
+        modeBadgeEl.className = 'badge bg-info text-dark';
+        modeBadgeEl.innerHTML = '<i class="bi bi-folder-symlink me-1"></i>Śledztwo Kryminalne';
+        document.getElementById('branch-indicator').classList.add('d-none');
+        document.getElementById('question-input-label').textContent = 'Twój ruch w śledztwie (przesłuchaj świadka, sprawdź ślad lub przedstaw oskarżenie):';
+        document.getElementById('question-input').placeholder = 'Np. Podchodzę do recepcjonisty i pytam, kto ostatni wchodził na piętro przed północą...';
+    } else {
+        modeBadgeEl.className = 'badge bg-danger';
+        modeBadgeEl.innerHTML = '<i class="bi bi-incognito me-1"></i>Czarna Historia';
+        document.getElementById('branch-indicator').classList.remove('d-none');
+        document.getElementById('question-input-label').textContent = 'Zadaj pytanie Mistrzowi Gry (najlepiej tak/nie lub o szczegóły zdarzenia):';
+        document.getElementById('question-input').placeholder = 'Np. Czy ofiara znała sprawcę przed dniem zdarzenia?';
+    }
+
+    document.getElementById('story-solvers-banner').innerHTML = getSolversNamesHtml(storyId);
+
+    // Wszystkie karty domyślnie zwinięte po wejściu do sprawy
     expandedNodeIds.clear();
     updateCompleteButtonUI();
     switchTab('tab-story');
@@ -301,10 +386,19 @@ async function syncStoryNodes() {
     }
 
     state.currentNodes = data || [];
-    // Domyślnie ustawiamy koniec głównej osi czasu jako punkt zaczepienia, jeśli gracz nie wybrał forka
     if (!state.activeLeafNodeId && state.currentNodes.length > 0) {
         state.activeLeafNodeId = state.currentNodes[state.currentNodes.length - 1].id;
     }
+
+    // Aktualizujemy na żywo listę osób, które oznaczyły rozwiązanie w tej sprawie
+    state.currentNodes.forEach(n => {
+        if (n.visibility === 'spoiler_solution') {
+            if (!state.storySolversMap[state.currentStory.id]) state.storySolversMap[state.currentStory.id] = new Set();
+            state.storySolversMap[state.currentStory.id].add(n.author_id);
+        }
+    });
+    document.getElementById('story-solvers-banner').innerHTML = getSolversNamesHtml(state.currentStory.id);
+
     renderNodesTimeline();
 }
 
@@ -312,44 +406,48 @@ function renderNodesTimeline() {
     const container = document.getElementById('nodes-timeline');
     const branchLabel = document.getElementById('branch-label');
     const resetBranchBtn = document.getElementById('btn-reset-branch');
+    const isCrime = state.currentStory.game_mode === 'crime_investigation';
 
     if (state.currentNodes.length === 0) {
-        container.innerHTML = '<p class="text-center text-secondary small py-3">Brak pytań w tej sprawie. Zadaj pierwsze pytanie poniżej!</p>';
+        container.innerHTML = '<p class="text-center text-secondary small py-3">Brak wpisów w tej sprawie. Rozpocznij śledztwo poniżej!</p>';
         branchLabel.textContent = 'Start śledztwa (Opis główny)';
         resetBranchBtn.classList.add('d-none');
         return;
     }
 
-    const lastNode = state.currentNodes[state.currentNodes.length - 1];
-    const isForked = state.activeLeafNodeId && state.activeLeafNodeId !== lastNode.id;
+    if (!isCrime) {
+        const lastNode = state.currentNodes[state.currentNodes.length - 1];
+        const isForked = state.activeLeafNodeId && state.activeLeafNodeId !== lastNode.id;
 
-    if (isForked) {
-        const idx = state.currentNodes.findIndex(n => n.id === state.activeLeafNodeId) + 1;
-        branchLabel.innerHTML = `<span class="text-warning">Rozwidlenie od pytania #${idx}</span>`;
-        resetBranchBtn.classList.remove('d-none');
-    } else {
-        branchLabel.textContent = 'Główna linia śledztwa (ostatni wpis)';
-        resetBranchBtn.classList.add('d-none');
+        if (isForked) {
+            const idx = state.currentNodes.findIndex(n => n.id === state.activeLeafNodeId) + 1;
+            branchLabel.innerHTML = `<span class="text-warning">Rozwidlenie od pytania #${idx}</span>`;
+            resetBranchBtn.classList.remove('d-none');
+        } else {
+            branchLabel.textContent = 'Główna linia śledztwa (ostatni wpis)';
+            resetBranchBtn.classList.add('d-none');
+        }
     }
 
     container.innerHTML = state.currentNodes.map((node, index) => {
         const author = state.usersMap[node.author_id] || { username: 'Gracz', avatar_color: '#6c757d' };
         const isMine = node.author_id === state.currentUser.id;
-        const isSelectedParent = node.id === state.activeLeafNodeId;
+        const isSelectedParent = !isCrime && node.id === state.activeLeafNodeId;
         const stepNumber = index + 1;
         const isExpanded = expandedNodeIds.has(node.id);
 
-        // Plakietka statusu widoczna od razu na zwiniętym pasku
+        // Plakietka statusu i klasa obramowania karty
         let badgeHtml = '';
-        if (node.visibility === 'private') {
-            badgeHtml = '<span class="badge bg-dark border border-secondary text-secondary"><i class="bi bi-lock-fill me-1"></i>Prywatne</span>';
-        } else if (node.visibility === 'spoiler_clue') {
+        let cardTypeClass = '';
+        if (node.visibility === 'spoiler_clue') {
             badgeHtml = '<span class="badge bg-warning text-dark"><i class="bi bi-lightbulb-fill me-1"></i>Wskazówka</span>';
+            cardTypeClass = 'is-clue';
         } else if (node.visibility === 'spoiler_solution') {
             badgeHtml = '<span class="badge bg-danger"><i class="bi bi-bullseye me-1"></i>Rozwiązanie</span>';
+            cardTypeClass = 'is-solution';
         }
 
-        // Panel oznaczania po fakcie (tylko dla autora danego pytania, widoczny po rozwinięciu)
+        // Panel oznaczania po fakcie (tylko dla autora danego pytania, bez opcji "Prywatne")
         const ownerControlsHtml = isMine ? `
             <div class="d-flex flex-wrap align-items-center gap-1 mt-2 pt-2 border-top border-secondary-subtle">
                 <span class="text-secondary me-1" style="font-size: 0.72rem;">Oznacz wpis:</span>
@@ -362,42 +460,39 @@ function renderNodesTimeline() {
                 <button class="btn btn-sm py-0 px-2 ${node.visibility === 'spoiler_solution' ? 'btn-danger fw-semibold' : 'btn-outline-danger'}" style="font-size: 0.72rem;" onclick="updateNodeVisibility('${node.id}', 'spoiler_solution')">
                     🎯 Rozwiązanie
                 </button>
-                <button class="btn btn-sm py-0 px-2 ${node.visibility === 'private' ? 'btn-dark border-light' : 'btn-outline-secondary'}" style="font-size: 0.72rem;" onclick="updateNodeVisibility('${node.id}', 'private')">
-                    🔒 Tylko dla mnie
-                </button>
             </div>
         ` : '';
 
-        // Czy karta może zostać rozwinięta przez zalogowanego użytkownika (cudzych wpisów 'private' nie da się rozwinąć)
-        const isLockedPrivateForMe = !isMine && node.visibility === 'private';
+        // Przycisk rozwidlania widoczny wyłącznie w trybie Czarna Historia
+        const forkButtonHtml = !isCrime ? `
+            <button class="btn btn-outline-info btn-sm py-0 px-2" style="font-size: 0.75rem;" onclick="forkFromNode('${node.id}')" title="Kontynuuj śledztwo od tego momentu (Git Fork)">
+                <i class="bi bi-diagram-2"></i> Rozwidlij stąd
+            </button>
+        ` : '';
 
-        const expandableBodyHtml = isLockedPrivateForMe
-            ? `<div id="node-secret-body-${node.id}" class="${isExpanded ? '' : 'd-none'} mt-2 pt-2 border-top border-secondary-subtle small text-secondary fst-italic">
-                   <i class="bi bi-shield-lock me-1"></i>Wpis prywatny autora (${escapeHtml(author.username)}). Możesz użyć „Rozwidlij stąd”, aby poprowadzić własną ścieżkę.
-               </div>`
-            : `<div id="node-secret-body-${node.id}" class="${isExpanded ? '' : 'd-none'} mt-2 pt-2 border-top border-secondary-subtle">
-                   <p class="mb-2 fw-semibold text-info-emphasis small">Pytanie: ${escapeHtml(node.question_text)}</p>
-                   <div class="border-top border-secondary-subtle pt-2 small">
-                       <span class="text-danger fw-bold me-1">AI:</span> <span class="text-light">${escapeHtml(node.ai_answer_text)}</span>
-                   </div>
-                   ${ownerControlsHtml}
-               </div>`;
+        const stepLabel = isCrime ? `Ruch #${stepNumber}` : `Pytanie #${stepNumber}`;
+        const questionPrefix = isCrime ? 'Detektyw:' : 'Pytanie:';
+        const answerPrefix = isCrime ? 'Akta / Postacie:' : 'AI:';
 
         return `
-            <div class="card node-card ${isSelectedParent ? 'is-active-parent' : ''}">
+            <div class="card node-card ${cardTypeClass} ${isSelectedParent ? 'is-active-parent' : ''}">
                 <div class="card-body py-2 px-3">
                     <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
                         <div class="d-flex align-items-center gap-2 flex-grow-1" style="cursor: pointer;" onclick="toggleNodeReveal('${node.id}')">
                             <span class="avatar-dot" style="background-color: ${author.avatar_color};">${author.username[0]}</span>
-                            <strong class="small text-light">${escapeHtml(author.username)} — Pytanie #${stepNumber}</strong>
+                            <strong class="small text-light">${escapeHtml(author.username)} — ${stepLabel}</strong>
                             ${badgeHtml}
                             <i id="node-chevron-${node.id}" class="bi ${isExpanded ? 'bi-chevron-up' : 'bi-chevron-down'} text-secondary small ms-1"></i>
                         </div>
-                        <button class="btn btn-outline-info btn-sm py-0 px-2" style="font-size: 0.75rem;" onclick="forkFromNode('${node.id}')" title="Kontynuuj śledztwo od tego momentu (Git Fork)">
-                            <i class="bi bi-diagram-2"></i> Rozwidlij stąd
-                        </button>
+                        ${forkButtonHtml}
                     </div>
-                    ${expandableBodyHtml}
+                    <div id="node-secret-body-${node.id}" class="${isExpanded ? '' : 'd-none'} mt-2 pt-2 border-top border-secondary-subtle">
+                        <p class="mb-2 fw-semibold text-info-emphasis small">${questionPrefix} ${escapeHtml(node.question_text)}</p>
+                        <div class="border-top border-secondary-subtle pt-2 small ai-narrative-text">
+                            <span class="text-danger fw-bold me-1">${answerPrefix}</span> <span class="text-light">${escapeHtml(node.ai_answer_text)}</span>
+                        </div>
+                        ${ownerControlsHtml}
+                    </div>
                 </div>
             </div>
         `;
@@ -426,7 +521,7 @@ window.toggleNodeReveal = function(nodeId) {
     }
 };
 
-// Zmiana oznaczenia wpisu (Zwykły / Wskazówka / Rozwiązanie / Prywatne) po poznaniu odpowiedzi AI
+// Zmiana oznaczenia wpisu (Zwykły / Wskazówka / Rozwiązanie) po poznaniu odpowiedzi AI
 window.updateNodeVisibility = async function(nodeId, newVisibility) {
     const { error } = await supabaseClient
         .from('ch_nodes')
@@ -442,10 +537,17 @@ window.updateNodeVisibility = async function(nodeId, newVisibility) {
     if (targetNode) {
         targetNode.visibility = newVisibility;
     }
+
+    if (newVisibility === 'spoiler_solution') {
+        if (!state.storySolversMap[state.currentStory.id]) state.storySolversMap[state.currentStory.id] = new Set();
+        state.storySolversMap[state.currentStory.id].add(state.currentUser.id);
+        document.getElementById('story-solvers-banner').innerHTML = getSolversNamesHtml(state.currentStory.id);
+    }
+
     renderNodesTimeline();
 };
 
-// Rozwidlanie ścieżki śledztwa (Git Fork)
+// Rozwidlanie ścieżki śledztwa (Git Fork - tylko Czarna Historia)
 window.forkFromNode = function(nodeId) {
     state.activeLeafNodeId = nodeId;
     renderNodesTimeline();
@@ -475,7 +577,6 @@ document.getElementById('btn-back-dashboard').addEventListener('click', async ()
 document.getElementById('btn-send-question').addEventListener('click', async () => {
     const input = document.getElementById('question-input');
     const questionText = input.value.trim();
-    const visibility = document.getElementById('visibility-select').value;
     const btn = document.getElementById('btn-send-question');
 
     if (!questionText) return;
@@ -497,7 +598,7 @@ document.getElementById('btn-send-question').addEventListener('click', async () 
                 parent_node_id: state.activeLeafNodeId,
                 author_id: state.currentUser.id,
                 question_text: questionText,
-                visibility: visibility
+                visibility: 'public'
             })
         });
 
@@ -553,6 +654,15 @@ document.getElementById('btn-toggle-complete').addEventListener('click', async (
     }
 
     state.userStatesMap[storyId] = { ...(state.userStatesMap[storyId] || {}), is_completed: newStatus };
+
+    if (!state.storySolversMap[storyId]) state.storySolversMap[storyId] = new Set();
+    if (newStatus) {
+        state.storySolversMap[storyId].add(state.currentUser.id);
+    } else {
+        state.storySolversMap[storyId].delete(state.currentUser.id);
+    }
+
+    document.getElementById('story-solvers-banner').innerHTML = getSolversNamesHtml(storyId);
     updateCompleteButtonUI();
 });
 
