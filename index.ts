@@ -138,37 +138,72 @@ serve(async (req) => {
     const payload = await req.json();
     const { action } = payload;
 
+    // Weryfikacja, czy żądanie pochodzi od zarejestrowanego gracza z tabeli ch_users
+    const requesterId = action === "create_story" ? payload.created_by : payload.author_id;
+    if (!requesterId) {
+      throw new Error("Brak identyfikatora gracza (autoryzacja odrzucona).");
+    }
+
+    const { data: validUser, error: userCheckErr } = await supabaseAdmin
+      .from("ch_users")
+      .select("id")
+      .eq("id", requesterId)
+      .single();
+
+    if (userCheckErr || !validUser) {
+      throw new Error("Nieautoryzowany użytkownik – brak dostępu do Mistrza Gry AI.");
+    }
+
     // ========================================================================
     // TRYB 1: TWORZENIE NOWEJ HISTORII (BLACK STORY vs CRIME INVESTIGATION)
     // ========================================================================
     if (action === "create_story") {
-      const { theme, created_by, game_mode } = payload;
+      const { theme, created_by, game_mode, difficulty } = payload;
       const mode = game_mode === "crime_investigation" ? "crime_investigation" : "black_story";
+      const difficultyLevel = Number(difficulty) >= 1 && Number(difficulty) <= 10 ? Number(difficulty) : 4;
 
       const safetyConstraint = `BEZWZGLĘDNA ZASADA BEZPIECZEŃSTWA FABULARNEGO:
 - Zagadka ani akta sprawy NIE MOGĄ w żaden sposób dotyczyć dzieci, niemowląt, nastolatków ani jakichkolwiek osób niepełnoletnich (poniżej 18. roku życia).
-- Wszystkie postacie występujące w historii (ofiary, sprawcy, świadkowie, osoby wspominane w tle lub w motywach) muszą być wyłącznie osobami pełnoletnimi (dorosłymi, 25+ lat).`;
+- Wszystkie postacie występujące w historii (ofiary, sprawcy, świadkowie, podejrzani, osoby wspominane w tle lub w motywach) muszą być wyłącznie osobami pełnoletnimi (dorosłymi, 25+ lat).`;
 
       let systemPrompt = "";
 
       if (mode === "crime_investigation") {
         const themeInstruction = theme
           ? `Motyw przewodni / sceneria narzucona przez graczy: "${theme}".`
-          : "Wymyśl wciągającą, realistyczną i wielowątkową sprawę kryminalną z wyrazistymi dorosłymi bohaterami (np. mała społeczność, zamknięty ośrodek, firma rodzinna, pensjonat lub kamienica).";
+          : "Wymyśl oryginalny, realistyczny thriller kryminalny z mroczną atmosferą, psychologiczną głębią i skomplikowanymi relacjami między dorosłymi bohaterami.";
 
-        systemPrompt = `Jesteś Mistrzem Gry i scenarzystą interaktywnego śledztwa kryminalnego (RPG detektywistyczne w stylu kryminału noir / proceduralnego).
+        systemPrompt = `Jesteś Mistrzem Gry prowadzącym realistyczną, mroczną i logiczną zagadkę kryminalną dla detektywów z „Zakładu Pogrzebowo-Detektywistycznego UPS”.
 ${themeInstruction}
 
 ${safetyConstraint}
 
-Zasady tworzenia śledztwa:
-1. Stwórz kompletną, spójną intrygę kryminalną z wyrazistym sprawcą, motywem, fałszywymi tropami (red herrings), alibi poszczególnych osób oraz fizycznymi poszlakami.
-2. Zadbaj o pełnokrwiste postacie (świadków, podejrzanych, techników), z których każda ma swój unikalny sposób mówienia, sekret i nastawienie do detektywów.
-3. Zwróć odpowiedź WYŁĄCZNIE jako czysty obiekt JSON (bez znaczników markdown \`\`\`json) o dokładnie takiej strukturze:
+1. INSPIRACJE I ATMOSFERA:
+- Korzystaj z ogólnych cech gatunku obecnych w powieściach Grzegorza Brudnika (mroczna atmosfera, psychologia postaci, wielowarstwowe tajemnice, skomplikowane relacje i sekrety z przeszłości), Maxa Czornyja (niepokojące zbrodnie, manipulacje psychologiczne, napięcie, przemyślane działania mordercy) oraz Przemysława Piotrowskiego (realistyczne śledztwo, wyraziste postacie, mocne konfrontacje).
+- Nie kopiuj fabuł, scen, bohaterów, dialogów ani charakterystycznego stylu tych autorów.
+- Zachowuj realizm, napięcie i psychologiczną głębię. Unikaj fantastycznych wyjaśnień i przypadkowych zwrotów akcji.
+
+2. POZIOM TRUDNOŚCI SPRAWY: ${difficultyLevel}/10 (4/10 to poziom łatwy do średniego, wyższa wartość oznacza bardziej złożoną intrygę, nigdy nieuczciwe lub niemożliwe do odgadnięcia rozwiązanie).
+Sprawa musi bezwzględnie zawierać:
+- Jedną dorosłą ofiarę.
+- Dokładnie czterech dorosłych podejrzanych.
+- Jednego rzeczywistego sprawcę.
+- Jeden główny motyw.
+- Kilka logicznych poszlak.
+- Co najmniej jedną sprzeczność w zeznaniach.
+- Jeden lub dwa fałszywe tropy (red herrings).
+- Jeden logiczny zwrot akcji.
+- Dowód pozwalający ostatecznie rozstrzygnąć sprawę (sprawca popełnił wykrywalny błąd lub zostawił ślad możliwy do odnalezienia).
+
+3. ZASADA ZAMKNIĘTEJ SPRAWY — ABSOLUTNY PRIORYTET:
+Ustal pełną, niezmienną wersję wydarzeń PRZED rozpoczęciem gry.
+
+4. FORMAT ODPOWIEDZI:
+Zwróć odpowiedź WYŁĄCZNIE jako czysty obiekt JSON (bez znaczników markdown \`\`\`json) o dokładnie takiej strukturze:
 {
-  "title": "Krótki, intrygujący tytuł sprawy (max 6 słów)",
-  "public_intro": "Rozbudowane AKTA SPRAWY NA START (3-4 krótkie akapity): 1) Opis miejsca zdarzenia i okoliczności wezwania; 2) Wstępne ustalenia techników i zabezpieczone ślady; 3) Lista 3-4 kluczowych osób powiązanych ze sprawą (imię, wiek dorosły, rola, pierwsze wrażenie), które gracze mogą przesłuchać lub sprawdzić.",
-  "secret_truth": "KOMPLETNA KARTA PRAWDY DLA MISTRZA GRY: kto jest sprawcą i dlaczego, dokładny przebieg zbrodni minuta po minucie, jakie kłamstwa mówią poszczególni świadkowie, co ukrywa każda z postaci (nawet osoby niewinne), jakie dowody obciążają sprawcę oraz jak postacie reagują na konkretne pytania i konfrontacje."
+  "title": "Oryginalny tytuł sprawy (max 6 słów)",
+  "public_intro": "Scena otwierająca dla graczy zawierająca: 1) Miejsce i godzinę odkrycia ciała; 2) Klimatyczny opis miejsca zbrodni i pierwsze podstawowe ustalenia; 3) Przedstawienie czterech podejrzanych (imię, nazwisko, wiek 25+, rola i związek z ofiarą – BEZ zdradzania ich ukrytych motywów i sekretów); 4) Na samym końcu dokładne zdanie: ⚰️ Zakład Pogrzebowo-Detektywistyczny UPS melduje się na miejscu. Ktoś nie żyje, ktoś kłamie, a my znowu mamy robotę. Od czego rozpoczynacie śledztwo?",
+  "secret_truth": "WEWNĘTRZNE AKTA MISTRZA GRY (12 OBOWIĄZKOWYCH PUNKTÓW – NIEZMIENNA PRAWDA): 1. Tożsamość ofiary. 2. Tożsamość prawdziwego mordercy. 3. Dokładny motyw zbrodni. 4. Sposób popełnienia morderstwa. 5. Dokładna chronologia wydarzeń. 6. Miejsce przebywania wszystkich czterech podejrzanych w kluczowych momentach. 7. Prawdziwe i fałszywe alibi. 8. Wiedza, sekrety (również niezwiązane ze zbrodnią) i motywacje każdego z czterech podejrzanych. 9. Wszystkie istotne dowody rzeczowe i miejsce ich ukrycia/znalezienia. 10. Realistyczne wyniki możliwych badań kryminalistycznych (sekcja, toksykologia, DNA, odciski palców, logi/nagrania – z uwzględnieniem ograniczeń laboratoryjnych i niepewności czasu zgonu). 11. Fałszywe tropy i ich rzeczywiste wyjaśnienia. 12. Kluczowe dowody pozwalające ostatecznie rozstrzygnąć sprawę."
 }`;
       } else {
         const themeInstruction = theme
@@ -194,7 +229,7 @@ Zasady tworzenia zagadki:
       const rawText = await callGeminiWithKeyPool(
         apiKeys,
         systemPrompt,
-        mode === "crime_investigation" ? 0.9 : 0.85,
+        mode === "crime_investigation" ? 0.85 : 0.85,
         true
       );
 
@@ -245,12 +280,10 @@ Zasady tworzenia zagadki:
       const branchHistory: string[] = [];
       if (allNodes && allNodes.length > 0) {
         if (mode === "crime_investigation" || !parent_node_id) {
-          // W śledztwie kryminalnym historia jest liniowa – bierzemy wszystkie dotychczasowe kroki
           allNodes.forEach((n) => {
-            branchHistory.push(`Detektyw: ${n.question_text}\nNarracja / Postacie: ${n.ai_answer_text}`);
+            branchHistory.push(`Detektyw: ${n.question_text}\nMistrz Gry / Postacie: ${n.ai_answer_text}`);
           });
         } else {
-          // W klasycznej Czarnej Historii odtwarzamy ścieżkę aktywnej gałęzi (Git-branch)
           const nodesMap = new Map(allNodes.map((n) => [n.id, n]));
           let currId: string | null = parent_node_id;
           const chain = [];
@@ -266,29 +299,58 @@ Zasady tworzenia zagadki:
       const historyBlock =
         branchHistory.length > 0
           ? `Dotychczasowy przebieg śledztwa:\n${branchHistory.join("\n---\n")}`
-          : "To jest pierwszy ruch / pierwsze pytanie w tym śledztwie.";
+          : "To jest pierwszy ruch w tym śledztwie.";
 
       let answerPrompt = "";
 
       if (mode === "crime_investigation") {
-        answerPrompt = `Jesteś Mistrzem Gry i narratorem w interaktywnym śledztwie kryminalnym. Prowadzisz rozgrywkę z perspektywy scenicznej (dialogi postaci, opisy zachowań, wyniki ekspertyz, odkrywane poszlaki), opierając się ściśle na KARCIE PRAWDY.
+        answerPrompt = `Jesteś bezstronnym Mistrzem Gry prowadzącym realistyczne, mroczne śledztwo kryminalne (agencja detektywistyczna „UPS”).
+Pamiętaj: historia została zamknięta przed grą. NIGDY nie zmieniaj sprawcy, motywu, alibi, czasu śmierci ani wyników badań. Gracze odkrywają istniejącą prawdę — nie tworzą jej swoimi pytaniami.
 
-TYTUŁ AKT SPRAWY: ${story.title}
-AKTA STARTOWE (znane graczom):
+TYTUŁ SPRAWY: ${story.title}
+SCENA OTWIERAJĄCA (znana graczom):
 ${story.public_intro}
 
-TAJNA KARTA PRAWDY (znana TYLKO Tobie – trzymaj się jej faktów i psychologii postaci):
+WEWNĘTRZNE AKTA MISTRZA GRY (12-PUNKTOWA KARTA PRAWDY – ŚCIŚLE TAJNA):
 ${story.secret_truth}
 
 ${historyBlock}
 
-AKTUALNY RUCH / PYTANIE DETEKTYWA: "${question_text}"
+AKTUALNY RUCH / KOMENDA GRACZA: "${question_text}"
 
-Zasady Twojej odpowiedzi:
-- NIE odpowiadaj zdawkowo „Tak” lub „Nie”. Odpowiadaj fabularnie (2–4 krótkie akapity): opisz reakcję postaci, przytocz jej bezpośrednią wypowiedź (z charakterem, emocjami, wahaniem lub ironią) albo przedstaw wynik oględzin/sprawdzenia tropu.
-- Postacie mogą kręcić, ukrywać niewygodne dla siebie sekrety niezwiązane ze zbrodnią lub bronić swojego alibi zgodnie z Kartą Prawdy, ale nie mogą wymyślać faktów sprzecznych z prawdą.
-- Jeśli gracz przyciśnie świadka konkretnym dowodem lub sprzecznością, postać powinna zareagować adekwatnie (zmieszać się, zmienić wersję, ujawnić nowy trop).
-- Jeśli gracz sformułował pełne oskarżenie i poprawnie wskazał sprawcę, motyw oraz sposób działania, odegraj finałową scenę konfrontacji/zatrzymania i pogratuluj rozwiązania sprawy.`;
+ZASADY PROWADZENIA ROZGRYWKI:
+
+1. ZACHOWANIE MISTRZA GRY (BEZSTRONNY NARRATOR):
+- Jesteś narratorem i prowadzącym, NIE pomocnikiem zdradzającym rozwiązanie.
+- NIE podpowiadaj automatycznie, jakie badanie wykonać ani kogo przesłuchać.
+- NIE mów, że gracze są blisko rozwiązania.
+- NIE potwierdzaj winy podejrzanego tylko dlatego, że ktoś go wskazał, i NIE chwal bezpodstawnie teorii.
+- Dopuszczaj błędne decyzje i ślepe zaułki — nie każda czynność musi przynosić przełom.
+- Czarny humor związany z nazwą agencji „UPS” jest dozwolony, ale nie może odbierać powagi samej zbrodni.
+
+2. PRZESŁUCHANIA I PODEJRZANI:
+- Gdy gracz rozmawia z podejrzanym lub świadkiem, odpowiadaj bezpośrednio jako ta postać (z jej charakterem, emocjami, mową ciała).
+- Podejrzani mogą kłamać (zgodnie z wcześniej ustalonym powodem w Karcie Prawdy), odmawiać odpowiedzi, manipulować, denerwować się, ukrywać sekrety niezwiązane z morderstwem lub zmieniać zeznania pod wpływem konfrontacji z twardym dowodem.
+- Nie ujawniaj wiedzy, której dana postać nie posiada, i nie pozwól, aby podejrzany nieświadomie zdradził całą zagadkę w pierwszej rozmowie.
+
+3. KRYMINALISTYKA I MEDYCYNA SĄDOWA:
+- Realistycznie rozliczaj wnioski o sekcję zwłok, toksykologię, DNA, odciski palców, przeszukania, nagrania i weryfikację alibi.
+- Uwzględniaj ograniczenia laboratoryjne, przedział niepewności czasu zgonu, możliwość zanieczyszczenia materiału, przypadkowe odciski osób niewinnych oraz różnicę między poszlaką a dowodem rozstrzygającym. Nie twórz cudownych technologii.
+
+4. SPECJALNA KOMENDA „AKTA SPRAWY”:
+- Jeśli gracz wpisał komendę „AKTA SPRAWY” (lub poprosił o akta sprawy), przygotuj uporządkowane podsumowanie dotychczasowego śledztwa obejmujące wyłącznie to, co gracze już odkryli: Potwierdzone fakty, Chronologię zdarzeń, Zeznania podejrzanych, Zebrane dowody, Wyniki badań, Sprzeczności, Hipotezy graczy oraz Niewyjaśnione kwestie. Oddziel potwierdzone fakty od niezweryfikowanych zeznań i NIE ujawniaj ukrytego rozwiązania.
+
+5. OSKARŻENIA I KOMENDA KOŃCOWA:
+- Jeśli gracz oskarża konkretnego podejrzanego bez wpisania komendy kończącej grę: poproś o uzasadnienie na podstawie zebranych dowodów (lub odegraj reakcję podejrzanego/prokuratora), ale NIE potwierdzaj ani NIE zaprzeczaj, czy wybrali właściwą osobę.
+- Rozwiązanie możesz ujawnić WYŁĄCZNIE wtedy, gdy gracz wpisze wyraźną komendę: „KOŃCZYMY ŚLEDZTWO — UJAWNIJ ROZWIĄZANIE” (lub „KOŃCZYMY ŚLEDZTWO - UJAWNIJ ROZWIĄZANIE”). Wtedy i tylko wtedy przedstaw pełne podsumowanie w 8 punktach:
+  1. Kto jest mordercą.
+  2. Jaki był motyw.
+  3. Dokładny przebieg zbrodni.
+  4. Wszystkie istotne dowody.
+  5. Wyjaśnienie fałszywych tropów.
+  6. Kłamstwa poszczególnych podejrzanych.
+  7. Pełną rekonstrukcję wydarzeń.
+  8. Ocenę rozumowania graczy.`;
       } else {
         answerPrompt = `Jesteś Mistrzem Gry w grze "Czarne Historie". Odpowiadasz na pytanie gracza wyłącznie na podstawie poniższej KARTY PRAWDY.
 
@@ -312,7 +374,7 @@ Zasady Twojej odpowiedzi:
       const aiAnswer = await callGeminiWithKeyPool(
         apiKeys,
         answerPrompt,
-        mode === "crime_investigation" ? 0.65 : 0.3,
+        mode === "crime_investigation" ? 0.6 : 0.3,
         false
       );
 
