@@ -101,20 +101,21 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
     errorBox.classList.add('d-none');
 
     const { data, error } = await supabaseClient
-        .from('ch_users')
-        .select('id, username, avatar_color')
-        .eq('username', username)
-        .eq('password', password)
-        .single();
+        .rpc('verify_ch_login', {
+            p_username: username,
+            p_password: password
+        });
 
-    if (error || !data) {
+    const userRecord = Array.isArray(data) ? data[0] : data;
+
+    if (error || !userRecord) {
         errorBox.textContent = 'Nieprawidłowe hasło. Wpisz swoje imię małymi literami.';
         errorBox.classList.remove('d-none');
         return;
     }
 
-    state.currentUser = data;
-    localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(data));
+    state.currentUser = userRecord;
+    localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(userRecord));
     updateUserBadge();
     await loadDashboardData();
     switchTab('tab-dashboard');
